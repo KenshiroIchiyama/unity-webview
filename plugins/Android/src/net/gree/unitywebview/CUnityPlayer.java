@@ -1,15 +1,15 @@
 package net.gree.unitywebview;
 
 import com.unity3d.player.*;
-import android.content.ContextWrapper;
+import android.content.Context;
 import android.view.SurfaceView;
 import android.view.View;
 
 public class CUnityPlayer
     extends UnityPlayer
 {
-    public CUnityPlayer(ContextWrapper contextwrapper) {
-        super(contextwrapper);
+    public CUnityPlayer(Context context) {
+        super(context);
     }
 
     public void addView(View child) {
