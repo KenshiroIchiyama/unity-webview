@@ -1,0 +1,26 @@
+name: FETCH
+
+on:
+  push:
+   branches:
+    - master
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      env:
+        ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+    - run: |
+        git config --global user.name "GithubAction Bot"
+        git config --global user.email "bot@github.com"
+        git remote add origin https://KenshiroIchiyama:${ACCESS_TOKEN}@github.com/KenshiroIchiyama/unity-webview.git
+        git remote add upstream https://github.com/gree/unity-webview.git
+        git fetch upstream
+        git checkout upstream
+        git merge --ff upstream/master
+        git push origin upstream
+        
