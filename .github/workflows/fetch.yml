@@ -12,12 +12,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v1
+    - name: Fetch
       env:
         ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
-    - run: |
+      run: |
         git config --global user.name "GithubAction Bot"
         git config --global user.email "bot@github.com"
-        git remote add origin https://KenshiroIchiyama:${ACCESS_TOKEN}@github.com/KenshiroIchiyama/unity-webview.git
+        git remote set-url origin https://KenshiroIchiyama:${ACCESS_TOKEN}@github.com/KenshiroIchiyama/unity-webview.git
         git remote add upstream https://github.com/gree/unity-webview.git
         git fetch upstream
         git checkout upstream
