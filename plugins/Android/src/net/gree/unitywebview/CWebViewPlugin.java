@@ -24,6 +24,7 @@ package net.gree.unitywebview;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
@@ -33,8 +34,10 @@ import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
+import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -42,6 +45,8 @@ import android.webkit.WebViewClient;
 import android.webkit.CookieManager;
 import android.webkit.CookieSyncManager;
 import android.widget.FrameLayout;
+import android.webkit.PermissionRequest;
+// import android.support.v4.app.ActivityCompat;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -49,6 +54,8 @@ import java.net.URLEncoder;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
 
 import com.unity3d.player.UnityPlayer;
 
@@ -79,6 +86,7 @@ class CWebViewPluginInterface {
 public class CWebViewPlugin {
     private static FrameLayout layout = null;
     private WebView mWebView;
+    private OnGlobalLayoutListener mGlobalLayoutListener;
     private CWebViewPluginInterface mWebViewPlugin;
     private int progress;
     private boolean canGoBack;
@@ -87,6 +95,30 @@ public class CWebViewPlugin {
     private String mWebViewUA;
 
     public CWebViewPlugin() {
+    }
+
+    public static boolean IsWebViewAvailable() {
+        final Activity a = UnityPlayer.currentActivity;
+        FutureTask<Boolean> t = new FutureTask<Boolean>(new Callable<Boolean>() {
+            public Boolean call() throws Exception {
+                boolean isAvailable = false;
+                try {
+                    WebView webView = new WebView(a);
+                    if (webView != null) {
+                        webView = null;
+                        isAvailable = true;
+                    }
+                } catch (Exception e) {
+                }
+                return isAvailable;
+            }
+        });
+        a.runOnUiThread(t);
+        try {
+            return t.get();
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public boolean IsInitialized() {
@@ -103,6 +135,15 @@ public class CWebViewPlugin {
             mCustomHeaders = new Hashtable<String, String>();
             
             final WebView webView = new WebView(a);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                try {
+                    ApplicationInfo ai = a.getPackageManager().getApplicationInfo(a.getPackageName(), 0);
+                    if ((ai.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                        webView.setWebContentsDebuggingEnabled(true);
+                    }
+                } catch (Exception ex) {
+                }
+            }
             webView.setVisibility(View.GONE);
             webView.setFocusable(true);
             webView.setFocusableInTouchMode(true);
@@ -115,6 +156,28 @@ public class CWebViewPlugin {
             // });
             webView.setWebChromeClient(new WebChromeClient() {
                 View videoView;
+
+                // cf. https://stackoverflow.com/questions/40659198/how-to-access-the-camera-from-within-a-webview/47525818#47525818
+                // cf. https://github.com/googlesamples/android-PermissionRequest/blob/eff1d21f0b9c91d67c7f2a2303b591447e61e942/Application/src/main/java/com/example/android/permissionrequest/PermissionRequestFragment.java#L148-L161
+                @Override
+                public void onPermissionRequest(final PermissionRequest request) {
+                    final String[] requestedResources = request.getResources();
+                    for (String r : requestedResources) {
+                        if (r.equals(PermissionRequest.RESOURCE_VIDEO_CAPTURE) || r.equals(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) {
+                            request.grant(requestedResources);
+                            // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            //     a.runOnUiThread(new Runnable() {public void run() {
+                            //         final String[] permissions = {
+                            //             "android.permission.CAMERA",
+                            //             "android.permission.RECORD_AUDIO",
+                            //         };
+                            //         ActivityCompat.requestPermissions(a, permissions, 0);
+                            //     }});
+                            // }
+                            break;
+                        }
+                    }
+                }
 
                 @Override
                 public void onProgressChanged(WebView view, int newProgress) {
@@ -151,11 +214,19 @@ public class CWebViewPlugin {
                     canGoForward = webView.canGoForward();
                     mWebViewPlugin.call("CallOnError", errorCode + "\t" + description + "\t" + failingUrl);
                 }
+                
+                @Override
+                public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+                	canGoBack = webView.canGoBack();
+                    canGoForward = webView.canGoForward();
+                    mWebViewPlugin.call("CallOnHttpError", Integer.toString(errorResponse.getStatusCode()));
+                }
 
                 @Override
                 public void onPageStarted(WebView view, String url, Bitmap favicon) {
                     canGoBack = webView.canGoBack();
                     canGoForward = webView.canGoForward();
+                    mWebViewPlugin.call("CallOnStarted", url);
                 }
 
                 @Override
@@ -239,6 +310,9 @@ public class CWebViewPlugin {
                 // Log.i("CWebViewPlugin", "Build.VERSION.SDK_INT = " + Build.VERSION.SDK_INT);
                 webSettings.setAllowUniversalAccessFromFileURLs(true);
             }
+            if (android.os.Build.VERSION.SDK_INT >= 17) {
+                webSettings.setMediaPlaybackRequiresUserGesture(false);
+            }
             webSettings.setDatabaseEnabled(true);
             webSettings.setDomStorageEnabled(true);
             String databasePath = webView.getContext().getDir("databases", Context.MODE_PRIVATE).getPath();
@@ -248,7 +322,7 @@ public class CWebViewPlugin {
                 webView.setBackgroundColor(0x00000000);
             }
 
-            if (layout == null) {
+            if (layout == null || layout.getParent() != a.findViewById(android.R.id.content)) {
                 layout = new FrameLayout(a);
                 a.addContentView(
                     layout,
@@ -268,7 +342,7 @@ public class CWebViewPlugin {
         }});
 
         final View activityRootView = a.getWindow().getDecorView().getRootView();
-        activityRootView.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+        mGlobalLayoutListener = new OnGlobalLayoutListener() {
             @Override
             public void onGlobalLayout() {
                 android.graphics.Rect r = new android.graphics.Rect();
@@ -292,7 +366,8 @@ public class CWebViewPlugin {
                     UnityPlayer.UnitySendMessage(gameObject, "SetKeyboardVisible", "false");
                 }
             }
-        });
+        };
+        activityRootView.getViewTreeObserver().addOnGlobalLayoutListener(mGlobalLayoutListener);
     }
 
     public void Destroy() {
@@ -300,6 +375,11 @@ public class CWebViewPlugin {
         a.runOnUiThread(new Runnable() {public void run() {
             if (mWebView == null) {
                 return;
+            }
+            if (mGlobalLayoutListener != null) {
+                View activityRootView = a.getWindow().getDecorView().getRootView();
+                activityRootView.getViewTreeObserver().removeOnGlobalLayoutListener(mGlobalLayoutListener);
+                mGlobalLayoutListener = null;
             }
             mWebView.stopLoading();
             layout.removeView(mWebView);
@@ -399,6 +479,23 @@ public class CWebViewPlugin {
         }});
     }
 
+    // cf. https://stackoverflow.com/questions/31788748/webview-youtube-videos-playing-in-background-on-rotation-and-minimise/31789193#31789193
+    public void OnApplicationPause(final boolean paused) {
+        final Activity a = UnityPlayer.currentActivity;
+        a.runOnUiThread(new Runnable() {public void run() {
+            if (mWebView == null) {
+                return;
+            }
+            if (paused) {
+                mWebView.onPause();
+                mWebView.pauseTimers();
+            } else {
+                mWebView.onResume();
+                mWebView.resumeTimers();
+            }
+        }});
+    }
+
     public void AddCustomHeader(final String headerKey, final String headerValue)
     {
         if (mCustomHeaders == null) {
@@ -457,4 +554,9 @@ public class CWebViewPlugin {
         }
     }
 
+    public String GetCookies(String url)
+    {
+        CookieManager cookieManager = CookieManager.getInstance();
+        return cookieManager.getCookie(url);
+    }
 }

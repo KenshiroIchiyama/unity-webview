@@ -20,11 +20,12 @@
 
 using System.Collections;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class SampleWebView : MonoBehaviour
 {
     public string Url;
-    public GUIText status;
+    public Text status;
     WebViewObject webViewObject;
 
     IEnumerator Start()
@@ -43,10 +44,14 @@ public class SampleWebView : MonoBehaviour
                 status.text = msg;
                 status.GetComponent<Animation>().Play();
             },
+            started: (msg) =>
+            {
+                Debug.Log(string.Format("CallOnStarted[{0}]", msg));
+            },
             ld: (msg) =>
             {
                 Debug.Log(string.Format("CallOnLoaded[{0}]", msg));
-#if !UNITY_ANDROID
+#if UNITY_EDITOR_OSX || !UNITY_ANDROID
                 // NOTE: depending on the situation, you might prefer
                 // the 'iframe' approach.
                 // cf. https://github.com/gree/unity-webview/issues/189
@@ -98,7 +103,7 @@ public class SampleWebView : MonoBehaviour
         webViewObject.SetMargins(5, 100, 5, Screen.height / 4);
         webViewObject.SetVisibility(true);
 
-#if !UNITY_WEBPLAYER
+#if !UNITY_WEBPLAYER && !UNITY_WEBGL
         if (Url.StartsWith("http")) {
             webViewObject.LoadURL(Url.Replace(" ", "%20"));
         } else {
@@ -144,7 +149,7 @@ public class SampleWebView : MonoBehaviour
         yield break;
     }
 
-#if !UNITY_WEBPLAYER
+#if !UNITY_WEBPLAYER && !UNITY_WEBGL
     void OnGUI()
     {
         GUI.enabled = webViewObject.CanGoBack();
@@ -160,6 +165,21 @@ public class SampleWebView : MonoBehaviour
         GUI.enabled = true;
 
         GUI.TextField(new Rect(200, 10, 300, 80), "" + webViewObject.Progress());
+
+        if (GUI.Button(new Rect(600, 10, 80, 80), "*")) {
+            var g = GameObject.Find("WebViewObject");
+            if (g != null) {
+                Destroy(g);
+            } else {
+                StartCoroutine(Start());
+            }
+        }
+        GUI.enabled = true;
+
+        if (GUI.Button(new Rect(700, 10, 80, 80), "c")) {
+            Debug.Log(webViewObject.GetCookies(Url));
+        }
+        GUI.enabled = true;
     }
 #endif
 }
