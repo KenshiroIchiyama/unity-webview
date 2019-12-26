@@ -44,9 +44,16 @@ static BOOL inEditor;
 
 @implementation CWebViewPlugin
 
+static WKProcessPool *_sharedProcessPool;
+
 - (id)initWithGameObject:(const char *)gameObject_ transparent:(BOOL)transparent width:(int)width height:(int)height ua:(const char *)ua
 {
     self = [super init];
+    @synchronized(self) {
+        if (_sharedProcessPool == NULL) {
+            _sharedProcessPool = [[WKProcessPool alloc] init];
+        }
+    }
     messages = [[NSMutableArray alloc] init];
     customRequestHeader = [[NSMutableDictionary alloc] init];
     WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
@@ -56,8 +63,9 @@ static BOOL inEditor;
     preferences.plugInsEnabled = true;
     [controller addScriptMessageHandler:self name:@"unityControl"];
     configuration.userContentController = controller;
+    configuration.processPool = _sharedProcessPool;
     // configuration.preferences = preferences;
-    NSRect frame = NSMakeRect(0, 0, width / 2, height / 2);
+    NSRect frame = NSMakeRect(0, 0, width, height);
     webView = [[WKWebView alloc] initWithFrame:frame
                                  configuration:configuration];
     [[[webView configuration] preferences] setValue:@YES forKey:@"developerExtrasEnabled"];
@@ -72,15 +80,15 @@ static BOOL inEditor;
     // [webView setPolicyDelegate:(id)self];
     webView.UIDelegate = self;
     webView.navigationDelegate = self;
-    gameObject = [[NSString stringWithUTF8String:gameObject_] retain];
+    gameObject = [NSString stringWithUTF8String:gameObject_];
     if (ua != NULL && strcmp(ua, "") != 0) {
         [webView setCustomUserAgent:[NSString stringWithUTF8String:ua]];
     }
 
-    window = [[[NSWindow alloc] initWithContentRect:frame
-                                styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable
-                                backing:NSBackingStoreBuffered
-                                defer:NO] autorelease];
+    window = [[NSWindow alloc] initWithContentRect:frame
+                                         styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable
+                                           backing:NSBackingStoreBuffered
+                                             defer:NO];
     [window setContentView:webView];
     [window orderFront:NSApp];
     windowController = [[NSWindowController alloc] initWithWindow:window];
@@ -88,7 +96,7 @@ static BOOL inEditor;
     return self;
 }
 
-- (void)dealloc
+- (void)dispose
 {
     @synchronized(self) {
         if (webView != nil) {
@@ -97,33 +105,25 @@ static BOOL inEditor;
             webView.UIDelegate = nil;
             webView.navigationDelegate = nil;
             [webView stopLoading:nil];
-            [webView release];
             webView = nil;
         }
         if (gameObject != nil) {
-            [gameObject release];
             gameObject = nil;
         }
         if (bitmap != nil) {
-            [bitmap release];
             bitmap = nil;
         }
         if (window != nil) {
-            [window release];
             window = nil;
         }
         if (windowController != nil){
-            [windowController release];
             windowController = nil;
         }
         if (messages != nil) {
-            [messages release];
             messages = nil;
         }
     }
-    [super dealloc];
 }
-
 
 /*
 - (void)webView:(WebView *)sender didFailProvisionalLoadWithError:(NSError *)error forFrame:(WebFrame *)frame
@@ -179,13 +179,13 @@ static BOOL inEditor;
         decisionHandler(WKNavigationActionPolicyCancel);
         return;
     }
-    NSURL *url = [navigationAction.request URL];
-    //if ([url.absoluteString rangeOfString:@"//itunes.apple.com/"].location != NSNotFound) {
-        // [[UIApplication sharedApplication] openURL:url];
-        // decisionHandler(WKNavigationActionPolicyCancel);
+    NSString *url = [[navigationAction.request URL] absoluteString];
+    //if ([url rangeOfString:@"//itunes.apple.com/"].location != NSNotFound) {
+    // [[UIApplication sharedApplication] openURL:url];
+    // decisionHandler(WKNavigationActionPolicyCancel);
     //} else
-    if ([url.absoluteString hasPrefix:@"unity:"]) {
-        [self addMessage:[NSString stringWithFormat:@"J%@",[url.absoluteString substringFromIndex:6]]];
+    if ([url hasPrefix:@"unity:"]) {
+        [self addMessage:[NSString stringWithFormat:@"J%@",[url substringFromIndex:6]]];
         decisionHandler(WKNavigationActionPolicyCancel);
     } else if (navigationAction.navigationType == WKNavigationTypeLinkActivated
                && (!navigationAction.targetFrame || !navigationAction.targetFrame.isMainFrame)) {
@@ -193,6 +193,7 @@ static BOOL inEditor;
         [webView loadRequest:navigationAction.request];
         decisionHandler(WKNavigationActionPolicyCancel);
     } else {
+        [self addMessage:[NSString stringWithFormat:@"S%@",url]];
         decisionHandler(WKNavigationActionPolicyAllow);
     }
 }
@@ -242,15 +243,16 @@ static BOOL inEditor;
     if (webView == nil)
         return;
     NSRect frame;
-    frame.size.width = width / 2;
-    frame.size.height = height / 2;
-    frame.origin.x = 0;
-    frame.origin.y = 0;
-    webView.frame = frame;
+    frame.size.width = width;
+    frame.size.height = height;
+    // frame.origin.x = 0;
+    // frame.origin.y = 0;
+    // webView.frame = frame;
     if (bitmap != nil) {
-        [bitmap release];
         bitmap = nil;
     }
+    frame.origin = window.frame.origin;
+    [window setFrame:frame display:YES];
 }
 
 - (void)setVisibility:(BOOL)visibility
@@ -351,40 +353,40 @@ static BOOL inEditor;
     if (buttonDown) {
         if (buttonPress) {
             event = [NSEvent mouseEventWithType:NSLeftMouseDown
-                location:NSMakePoint(x, y) modifierFlags:0
-                timestamp:GetCurrentEventTime() windowNumber:0
-                context:context eventNumber:0 clickCount:1 pressure:1];
+                                       location:NSMakePoint(x, y) modifierFlags:0
+                                      timestamp:GetCurrentEventTime() windowNumber:0
+                                        context:context eventNumber:0 clickCount:1 pressure:1];
             [view mouseDown:event];
         } else {
             event = [NSEvent mouseEventWithType:NSLeftMouseDragged
-                location:NSMakePoint(x, y) modifierFlags:0
-                timestamp:GetCurrentEventTime() windowNumber:0
-                context:context eventNumber:0 clickCount:0 pressure:1];
+                                       location:NSMakePoint(x, y) modifierFlags:0
+                                      timestamp:GetCurrentEventTime() windowNumber:0
+                                        context:context eventNumber:0 clickCount:0 pressure:1];
             [view mouseDragged:event];
         }
     } else if (buttonRelease) {
         event = [NSEvent mouseEventWithType:NSLeftMouseUp
-            location:NSMakePoint(x, y) modifierFlags:0
-            timestamp:GetCurrentEventTime() windowNumber:0
-            context:context eventNumber:0 clickCount:0 pressure:0];
+                                   location:NSMakePoint(x, y) modifierFlags:0
+                                  timestamp:GetCurrentEventTime() windowNumber:0
+                                    context:context eventNumber:0 clickCount:0 pressure:0];
         [view mouseUp:event];
     }
 
     if (keyPress) {
         characters = [NSString stringWithUTF8String:keyChars];
         event = [NSEvent keyEventWithType:NSKeyDown
-            location:NSMakePoint(x, y) modifierFlags:0
-            timestamp:GetCurrentEventTime() windowNumber:0
-            context:context
-            characters:characters
-            charactersIgnoringModifiers:characters
-            isARepeat:NO keyCode:(unsigned short)keyCode];
+                                 location:NSMakePoint(x, y) modifierFlags:0
+                                timestamp:GetCurrentEventTime() windowNumber:0
+                                  context:context
+                               characters:characters
+                         charactersIgnoringModifiers:characters
+                                isARepeat:NO keyCode:(unsigned short)keyCode];
         [view keyDown:event];
     }
 
     if (deltaY != 0) {
         CGEventRef cgEvent = CGEventCreateScrollWheelEvent(NULL,
-            kCGScrollEventUnitLine, 1, deltaY * 3, 0);
+                                                           kCGScrollEventUnitLine, 1, deltaY * 3, 0);
         NSEvent *scrollEvent = [NSEvent eventWithCGEvent:cgEvent];
         CFRelease(cgEvent);
         [view scrollWheel:scrollEvent];
@@ -393,10 +395,10 @@ static BOOL inEditor;
     @synchronized(self) {
         if (refreshBitmap) {
             if (bitmap == nil) {
-                bitmap = [[webView bitmapImageRepForCachingDisplayInRect:webView.frame] retain];
+                bitmap = [webView bitmapImageRepForCachingDisplayInRect:webView.frame];
             }
-            memset([bitmap bitmapData], 0, [bitmap bytesPerRow] * [bitmap pixelsHigh]);
-            [webView cacheDisplayInRect:webView.frame toBitmapImageRep:bitmap];
+            memset([bitmap bitmapData], 128, [bitmap bytesPerRow] * [bitmap pixelsHigh]);
+            // [webView cacheDisplayInRect:webView.frame toBitmapImageRep:bitmap];
         }
         needsDisplay = refreshBitmap;
     }
@@ -500,34 +502,34 @@ typedef void (*UnityRenderEventFunc)(int eventId);
 #ifdef __cplusplus
 extern "C" {
 #endif
-const char *_CWebViewPlugin_GetAppPath(void);
-void *_CWebViewPlugin_Init(
-    const char *gameObject, BOOL transparent, int width, int height, const char *ua, BOOL ineditor);
-void _CWebViewPlugin_Destroy(void *instance);
-void _CWebViewPlugin_SetRect(void *instance, int width, int height);
-void _CWebViewPlugin_SetVisibility(void *instance, BOOL visibility);
-void _CWebViewPlugin_LoadURL(void *instance, const char *url);
-void _CWebViewPlugin_LoadHTML(void *instance, const char *html, const char *baseUrl);
-void _CWebViewPlugin_EvaluateJS(void *instance, const char *url);
-int _CWebViewPlugin_Progress(void *instance);
-BOOL _CWebViewPlugin_CanGoBack(void *instance);
-BOOL _CWebViewPlugin_CanGoForward(void *instance);
-void _CWebViewPlugin_GoBack(void *instance);
-void _CWebViewPlugin_GoForward(void *instance);
-void _CWebViewPlugin_Update(void *instance, int x, int y, float deltaY,
-    BOOL buttonDown, BOOL buttonPress, BOOL buttonRelease,
-    BOOL keyPress, unsigned char keyCode, const char *keyChars, BOOL refreshBitmap);
-int _CWebViewPlugin_BitmapWidth(void *instance);
-int _CWebViewPlugin_BitmapHeight(void *instance);
-void _CWebViewPlugin_SetTextureId(void *instance, int textureId);
-void _CWebViewPlugin_SetCurrentInstance(void *instance);
-void UnityRenderEvent(int eventId);
-UnityRenderEventFunc GetRenderEventFunc(void);
-void _CWebViewPlugin_AddCustomHeader(void *instance, const char *headerKey, const char *headerValue);
-void _CWebViewPlugin_RemoveCustomHeader(void *instance, const char *headerKey);
-void _CWebViewPlugin_ClearCustomHeader(void *instance);
-const char *_CWebViewPlugin_GetCustomHeaderValue(void *instance, const char *headerKey);
-const char *_CWebViewPlugin_GetMessage(void *instance);
+    const char *_CWebViewPlugin_GetAppPath(void);
+    void *_CWebViewPlugin_Init(
+        const char *gameObject, BOOL transparent, int width, int height, const char *ua, BOOL ineditor);
+    void _CWebViewPlugin_Destroy(void *instance);
+    void _CWebViewPlugin_SetRect(void *instance, int width, int height);
+    void _CWebViewPlugin_SetVisibility(void *instance, BOOL visibility);
+    void _CWebViewPlugin_LoadURL(void *instance, const char *url);
+    void _CWebViewPlugin_LoadHTML(void *instance, const char *html, const char *baseUrl);
+    void _CWebViewPlugin_EvaluateJS(void *instance, const char *url);
+    int _CWebViewPlugin_Progress(void *instance);
+    BOOL _CWebViewPlugin_CanGoBack(void *instance);
+    BOOL _CWebViewPlugin_CanGoForward(void *instance);
+    void _CWebViewPlugin_GoBack(void *instance);
+    void _CWebViewPlugin_GoForward(void *instance);
+    void _CWebViewPlugin_Update(void *instance, int x, int y, float deltaY,
+                                BOOL buttonDown, BOOL buttonPress, BOOL buttonRelease,
+                                BOOL keyPress, unsigned char keyCode, const char *keyChars, BOOL refreshBitmap);
+    int _CWebViewPlugin_BitmapWidth(void *instance);
+    int _CWebViewPlugin_BitmapHeight(void *instance);
+    void _CWebViewPlugin_SetTextureId(void *instance, int textureId);
+    void _CWebViewPlugin_SetCurrentInstance(void *instance);
+    void UnityRenderEvent(int eventId);
+    UnityRenderEventFunc GetRenderEventFunc(void);
+    void _CWebViewPlugin_AddCustomHeader(void *instance, const char *headerKey, const char *headerValue);
+    void _CWebViewPlugin_RemoveCustomHeader(void *instance, const char *headerKey);
+    void _CWebViewPlugin_ClearCustomHeader(void *instance);
+    const char *_CWebViewPlugin_GetCustomHeaderValue(void *instance, const char *headerKey);
+    const char *_CWebViewPlugin_GetMessage(void *instance);
 #ifdef __cplusplus
 }
 #endif
@@ -549,45 +551,46 @@ void *_CWebViewPlugin_Init(
         pool = [[NSMutableSet alloc] init];
 
     inEditor = ineditor;
-    id instance = [[CWebViewPlugin alloc] initWithGameObject:gameObject transparent:transparent width:width height:height ua:ua];
-    [pool addObject:[NSValue valueWithPointer:instance]];
-    return (void *)instance;
+    CWebViewPlugin *webViewPlugin = [[CWebViewPlugin alloc] initWithGameObject:gameObject transparent:transparent width:width height:height ua:ua];
+    [pool addObject:webViewPlugin];
+    return (__bridge_retained void *)webViewPlugin;
 }
 
 void _CWebViewPlugin_Destroy(void *instance)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
-    [webViewPlugin release];
-    [pool removeObject:[NSValue valueWithPointer:instance]];
+    CWebViewPlugin *webViewPlugin = (__bridge_transfer CWebViewPlugin *)instance;
+    [pool removeObject:webViewPlugin];
+    [webViewPlugin dispose];
+    webViewPlugin = nil;
 }
 
 void _CWebViewPlugin_SetRect(void *instance, int width, int height)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin setRect:width height:height];
 }
 
 void _CWebViewPlugin_SetVisibility(void *instance, BOOL visibility)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin setVisibility:visibility];
 }
 
 void _CWebViewPlugin_LoadURL(void *instance, const char *url)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin loadURL:url];
 }
 
 void _CWebViewPlugin_LoadHTML(void *instance, const char *html, const char *baseUrl)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin loadHTML:html baseURL:baseUrl];
 }
 
 void _CWebViewPlugin_EvaluateJS(void *instance, const char *js)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin evaluateJS:js];
 }
 
@@ -622,30 +625,30 @@ void _CWebViewPlugin_GoForward(void *instance)
 }
 
 void _CWebViewPlugin_Update(void *instance, int x, int y, float deltaY,
-    BOOL buttonDown, BOOL buttonPress, BOOL buttonRelease,
-    BOOL keyPress, unsigned char keyCode, const char *keyChars, BOOL refreshBitmap)
+                            BOOL buttonDown, BOOL buttonPress, BOOL buttonRelease,
+                            BOOL keyPress, unsigned char keyCode, const char *keyChars, BOOL refreshBitmap)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin update:x y:y deltaY:deltaY buttonDown:buttonDown
-        buttonPress:buttonPress buttonRelease:buttonRelease keyPress:keyPress
-        keyCode:keyCode keyChars:keyChars refreshBitmap:refreshBitmap];
+              buttonPress:buttonPress buttonRelease:buttonRelease keyPress:keyPress
+                  keyCode:keyCode keyChars:keyChars refreshBitmap:refreshBitmap];
 }
 
 int _CWebViewPlugin_BitmapWidth(void *instance)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     return [webViewPlugin bitmapWide];
 }
 
 int _CWebViewPlugin_BitmapHeight(void *instance)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     return [webViewPlugin bitmapHigh];
 }
 
 void _CWebViewPlugin_SetTextureId(void *instance, int textureId)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin setTextureId:textureId];
 }
 
@@ -662,9 +665,9 @@ void UnityRenderEvent(int eventId)
         if (_instance == nil) {
             return;
         }
-        if ([pool containsObject:[NSValue valueWithPointer:(void *)_instance]]) {
-            CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)_instance;
-            _instance = nil;
+        CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)_instance;
+        _instance = nil;
+        if ([pool containsObject:webViewPlugin]) {
             [webViewPlugin render];
         }
     }
@@ -677,31 +680,31 @@ UnityRenderEventFunc GetRenderEventFunc(void)
 
 void _CWebViewPlugin_AddCustomHeader(void *instance, const char *headerKey, const char *headerValue)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin addCustomRequestHeader:headerKey value:headerValue];
 }
 
 void _CWebViewPlugin_RemoveCustomHeader(void *instance, const char *headerKey)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin removeCustomRequestHeader:headerKey];
 }
 
 const char *_CWebViewPlugin_GetCustomHeaderValue(void *instance, const char *headerKey)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     return [webViewPlugin getCustomRequestHeaderValue:headerKey];
 }
 
 void _CWebViewPlugin_ClearCustomHeader(void *instance)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     [webViewPlugin clearCustomRequestHeader];
 }
 
 const char *_CWebViewPlugin_GetMessage(void *instance)
 {
-    CWebViewPlugin *webViewPlugin = (CWebViewPlugin *)instance;
+    CWebViewPlugin *webViewPlugin = (__bridge CWebViewPlugin *)instance;
     NSString *message = [webViewPlugin getMessage];
     if (message == nil)
         return NULL;
@@ -710,4 +713,3 @@ const char *_CWebViewPlugin_GetMessage(void *instance)
     strcpy(r, s);
     return r;
 }
-

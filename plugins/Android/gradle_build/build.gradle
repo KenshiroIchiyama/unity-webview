@@ -1,12 +1,12 @@
 apply plugin: 'com.android.library'
 
 dependencies {
-    provided files('./libs/classes.jar')
+    compileOnly files('./libs/classes.jar')
 }
 
 android {
     compileSdkVersion 23
-    buildToolsVersion "24.0.0"
+    buildToolsVersion "28.0.2"
 
     defaultConfig {
         minSdkVersion 16
